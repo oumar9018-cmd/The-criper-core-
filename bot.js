@@ -1,27 +1,47 @@
+const express = require('express');
 const TelegramBot = require('node-telegram-bot-api');
 const fs = require('fs');
 const path = require('path');
 
 const config = require('./config.json');
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Render health route
+app.get('/', (req, res) => {
+  res.send('Cipher Core bot is live.');
+});
+
+app.listen(PORT, () => {
+  console.log(`Web server running on port ${PORT}`);
+});
+
 const bot = new TelegramBot(config.botToken, { polling: true });
 
 const USERS_FILE = path.join(__dirname, 'users.json');
-const MINING_REWARD = 50;
 const MINING_COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2 hours
+const MINING_REWARD = 50;
 
 function loadUsers() {
   try {
-    if (!fs.existsSync(USERS_FILE)) fs.writeFileSync(USERS_FILE, '[]');
+    if (!fs.existsSync(USERS_FILE)) {
+      fs.writeFileSync(USERS_FILE, '[]');
+    }
     const raw = fs.readFileSync(USERS_FILE, 'utf8');
     return JSON.parse(raw || '[]');
-  } catch (e) {
-    console.error('Error loading users:', e);
+  } catch (err) {
+    console.error('Error loading users:', err);
     return [];
   }
 }
 
 function saveUsers(users) {
-  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+  try {
+    fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+  } catch (err) {
+    console.error('Error saving users:', err);
+  }
 }
 
 function getUser(users, tgId) {
@@ -32,7 +52,7 @@ function createUser(from, referredBy = null) {
   return {
     tgId: String(from.id),
     username: from.username || '',
-    firstName: from.first_name || '',
+    firstName: from.first_name || 'Node',
     points: 0,
     referrals: 0,
     referredUsers: [],
@@ -42,7 +62,7 @@ function createUser(from, referredBy = null) {
     verifiedTelegram: false,
     verifiedX: false,
     waitlistTag: 'EARLY NODE',
-    miningRate: 50
+    miningRate: MINING_REWARD
   };
 }
 
@@ -89,7 +109,8 @@ async function isChannelMember(userId) {
   try {
     const member = await bot.getChatMember(`@${config.channelUsername}`, userId);
     return ['member', 'administrator', 'creator'].includes(member.status);
-  } catch (e) {
+  } catch (err) {
+    console.error('Channel membership check failed:', err.message);
     return false;
   }
 }
@@ -108,40 +129,40 @@ function whitepaperText() {
 ⬛ *CIPHER CORE — GENESIS WAITLIST PAPER*
 
 *1. Overview*
-Cipher Core is a waitlist-first node activation system designed around disciplined participation rather than mindless tapping. Early participants accumulate CP (Core Points) during the waitlist phase.
+Cipher Core is a waitlist-first node activation system built around consistent participation.
 
 *2. Waitlist Phase*
-Users who enter during the early phase receive:
-• Early Node tag  
-• Priority access to release phases  
-• Pre-release CP accumulation  
-• Higher mining speed during the closed waitlist stage
+Early waitlist users receive:
+• Early Node tag
+• Priority positioning
+• Pre-release CP accumulation
+• Stronger early participation window
 
 *3. Mining Logic*
-• Mining cycle: every 2 hours  
-• Reward per cycle: *50 CP*  
-• During full public release, mining speed may be reduced to protect long-term ecosystem balance.
+• Mining cycle: every 2 hours
+• Reward per cycle: *50 CP*
+• Public release may reduce mining speed to protect long-term balance
 
-*4. Why early access matters*
-Early waitlist users may benefit from:
-• stronger point accumulation window  
-• earlier network positioning  
-• higher visibility in initial leaderboard phases  
-• possible recognition tags for early participation
+*4. Early Positioning*
+Early users may benefit from:
+• better starting position
+• stronger accumulation window
+• leaderboard visibility
+• special identity tags
 
 *5. Referral Structure*
-Users can invite new nodes and grow their standing through referrals. Referrals are tracked uniquely per Telegram account.
+Each valid referral is tracked uniquely per Telegram account.
 
-*6. Fairness*
-Every node is linked to a unique Telegram ID. Duplicate point merging is prevented by user-specific identity mapping.
+*6. User Identity*
+Every node is mapped to a unique Telegram ID to avoid user mix-ups.
 
 *7. Release Direction*
-The waitlist is the first controlled layer. Public release is expected to be more competitive, with slower accumulation and broader participation.
+Waitlist is controlled. Public release is expected to be more competitive.
 
-*8. Important note*
-CP earned during waitlist represents pre-release engagement points and may later be mapped into the public system according to final release rules.
+*8. Notes*
+CP earned during waitlist represents pre-release participation points.
 
-*Early access is not guaranteed forever. The earliest nodes always enter with the strongest position.*
+*The earliest nodes enter before the system becomes crowded.*
 `;
 }
 
@@ -180,9 +201,9 @@ bot.onText(/\/start(?: (.+))?/, async (msg, match) => {
 
 Your node identity has been initialized.
 
-*Status:* Waitlist Phase  
-*Mining Cycle:* 2 Hours  
-*Reward:* 50 CP per cycle  
+*Status:* Waitlist Phase
+*Mining Cycle:* 2 Hours
+*Reward:* 50 CP per cycle
 *Tag:* ${user.waitlistTag}
 
 Use the controls below to verify access, mine, and track your waitlist status.
@@ -192,8 +213,8 @@ Use the controls below to verify access, mine, and track your waitlist status.
       parse_mode: 'Markdown',
       ...mainMenu()
     });
-  } catch (e) {
-    console.error(e);
+  } catch (err) {
+    console.error('Start error:', err);
     bot.sendMessage(msg.chat.id, 'Something went wrong while starting your node.');
   }
 });
@@ -221,8 +242,7 @@ bot.on('callback_query', async (query) => {
       const member = await isChannelMember(tgId);
       user.verifiedTelegram = member;
 
-      // X verification manual placeholder
-      // User confirms by tapping; later can be replaced by proper OAuth/task verification
+      // Placeholder X verification
       user.verifiedX = true;
 
       saveUsers(users);
@@ -303,9 +323,11 @@ bot.on('callback_query', async (query) => {
         ? Math.max(0, MINING_COOLDOWN_MS - (Date.now() - user.lastMineAt))
         : 0;
 
+      const displayName = user.username ? '@' + user.username : user.firstName;
+
       await bot.sendMessage(chatId,
         `📊 *My Node Status*\n\n` +
-        `*Name:* ${user.username ? '@' + user.username : user.firstName}\n` +
+        `*Name:* ${displayName}\n` +
         `*Points:* ${user.points} CP\n` +
         `*Referrals:* ${user.referrals}\n` +
         `*Telegram Verified:* ${user.verifiedTelegram ? 'Yes' : 'No'}\n` +
@@ -317,8 +339,8 @@ bot.on('callback_query', async (query) => {
     }
 
     await bot.answerCallbackQuery(query.id);
-  } catch (e) {
-    console.error(e);
+  } catch (err) {
+    console.error('Callback error:', err);
     try {
       await bot.answerCallbackQuery(query.id, { text: 'Something went wrong' });
     } catch {}
@@ -327,15 +349,18 @@ bot.on('callback_query', async (query) => {
 
 bot.onText(/\/users/, (msg) => {
   if (!config.adminIds.includes(msg.from.id)) return;
+
   const users = loadUsers();
   const text = users.map((u, i) =>
     `${i + 1}. ${u.firstName || 'Node'} | ${u.username ? '@' + u.username : 'no_username'} | ${u.points} CP | refs:${u.referrals}`
   ).join('\n') || 'No users yet.';
+
   bot.sendMessage(msg.chat.id, text.slice(0, 4000));
 });
 
 bot.onText(/\/stats/, (msg) => {
   if (!config.adminIds.includes(msg.from.id)) return;
+
   const users = loadUsers();
   const verified = users.filter(u => u.verifiedTelegram && u.verifiedX).length;
   const totalPoints = users.reduce((sum, u) => sum + u.points, 0);
@@ -348,6 +373,8 @@ bot.onText(/\/stats/, (msg) => {
   );
 });
 
-bot.on('polling_error', console.error);
+bot.on('polling_error', (err) => {
+  console.error('Polling error:', err.message);
+});
 
 console.log('Cipher Core bot is running...');
