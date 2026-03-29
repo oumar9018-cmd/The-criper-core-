@@ -1,1 +1,6 @@
-
+{
+  "botToken": "8243715991:AAEJOot7wuRRKIPKLwmu7H8H6bf-2WXkR60",
+  "channelUsername": "yourtelegramchannel",
+  "xUrl": "https://x.com/yourprofile",
+  "adminIds": [123456789]
+}
